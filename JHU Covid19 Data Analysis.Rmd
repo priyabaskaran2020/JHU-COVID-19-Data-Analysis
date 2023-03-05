@@ -1,0 +1,224 @@
+---
+title: "JHU Covid-19 Data Analysis"
+author: "SathiyaPriya Ravikumar"
+date: "2023-03-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
+```
+
+## Introduction about Covid-19
+
+In the Wuhan region of China, the coronavirus illness (COVID-19) was first noted as an epidemic in December 2019. It quickly spread throughout the nation and eventually went worldwide. 
+
+The COVID-19 virus can transmit from person to person contact, according to the WHO. More nations are declaring quarantine policies that include self-isolation orders against citizens and the temporary lockdown of an area. According to the US Centers for Disease Control and Prevention, these actions are intended to "flatten the curve," which can postpone the peak of an epidemic, ease the peak load on hospitals, and decrease overall cases and health effects. (CDC). 
+
+The Covid-19 data from Johns Hopkins University is a frequently used resource for monitoring the worldwide coronavirus pandemic. Information on the number of confirmed cases, fatalities, and recoveries in nations and regions around the globe is compiled and updated every day. Researchers, journalists, and lawmakers frequently use the data, which is readily available, to track the virus's spread and guide decisions. Informing public health responses to the pandemic, the JHU Covid-19 data is regarded as a trustworthy source of knowledge.
+
+
+## Importing libraries
+
+Libraries used in this analysis are as follows,
+
+1. tidyverse
+2. lubridate
+3. dplyr
+4. knitr
+5. kableExtra
+
+```{r library, message = FALSE}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+```
+
+## Importing JHU Covid-19 data
+
+```{r get_jhu_data, message = FALSE}
+##Get current data in four files
+#they all begin in the same way
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv", "time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv")
+
+urls <- str_c(url_in,file_names)
+
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+## Tidying and Transforming the global data
+
+```{r tidying_and_transforming_global_data, message = FALSE}
+global_cases <- global_cases %>% pivot_longer (cols = -c ('Province/State', 'Country/Region', Lat, Long), names_to = "date", values_to = "cases")
+
+global_cases <- global_cases %>% select(-c(Lat,Long))
+
+global_deaths <- global_deaths %>% pivot_longer (cols = -c ('Province/State', 'Country/Region', Lat, Long), names_to = "date", values_to = "deaths")
+
+global_deaths <- global_deaths %>% select(-c(Lat,Long))
+
+global <- global_cases %>% full_join(global_deaths) %>% rename (Country_Region = 'Country/Region', Province_State = 'Province/State') %>% mutate (date = mdy (date))
+```
+
+## Global data Summary
+
+```{r summary_global_data}
+global <- global %>% filter(cases>0)
+summary(global)
+```
+
+## Tidying and transforming US data
+```{r tidying_and_transforming_US_data, message = FALSE}
+US_cases <- US_cases %>% pivot_longer(cols = -(UID:Combined_Key), names_to = "date", values_to = "cases") %>% select(Admin2:cases) %>% mutate(date = mdy(date)) %>% select(-c(Lat,Long_))
+
+US_deaths <- US_deaths %>% pivot_longer(cols = -(UID:Population), names_to = "date", values_to = "deaths") %>% select(Admin2:deaths) %>% mutate(date = mdy(date)) %>% select(-c(Lat,Long_))
+
+US <- US_cases %>% full_join(US_deaths)
+
+global <- global %>% unite("Combined_Key", c(Province_State, Country_Region), sep = ", ", na.rm = TRUE, remove = FALSE)
+```
+
+## Importing population data and joining with the global dataset
+```{r importing_population_data_and_joining_with_the_global_dataset, message = FALSE}
+
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+
+uid <- read_csv(uid_lookup_url) %>% select(-c(Lat, Long_,Combined_Key, code3, iso2, iso3, Admin2))
+
+global <- global %>% left_join(uid, by = c("Province_State", "Country_Region")) 
+
+global <- global %>% select(-c(UID, FIPS))
+```
+
+## First Level of Analysis and Visualization for whole of US and California
+```{r First_Level_of_Analysis_and_Visualization_for_US_data, message = FALSE}
+
+US_by_state <- US %>% group_by(Province_State, Country_Region, date) %>% 
+summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>% mutate(deaths_per_million = deaths * 1000000 / Population) %>% select(Province_State, Country_Region, date, cases, deaths, deaths_per_million, Population) %>% ungroup()
+
+US_totals <- US_by_state %>% group_by(Country_Region, date) %>% 
+summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>% mutate(deaths_per_million = deaths * 1000000 / Population) %>% select(Country_Region, date, cases, deaths, deaths_per_million, Population) %>% ungroup()
+
+US_totals %>% filter(cases > 0) %>% ggplot(aes(x = date, y = cases)) + geom_line(aes(color = "cases")) + geom_point(aes(color = "cases")) + geom_line(aes(y = deaths, color = "deaths")) + geom_point(aes(y = deaths, color = "deaths")) + scale_y_log10() + theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) + labs(title = "COVID19 in US", y = NULL ) 
+
+state <- "California"
+
+US_by_state %>%  filter(Province_State == state) %>% filter(cases > 0) %>% ggplot(aes(x = date, y = cases)) + geom_line(aes(color = "cases")) + geom_point(aes(color = "cases")) + geom_line(aes(y = deaths, color = "deaths")) + geom_point(aes(y = deaths, color = "deaths")) + scale_y_log10() + theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) + labs(title = str_c("COVID19 in ", state), y = NULL ) 
+```
+
+From the above two visualizations, we can see that the Covid 19 cases and deaths to have flattened out over the course of time. This is because our data has aggregated values of cases and deaths. Now, Let's find out the number of cases and deaths for each day using the window function called as **Lag** function and add them to the US dataset.
+
+## Adding new columns to the US dataset
+
+```{r Adding_new_columns_to_the_US_dataset, message = FALSE}
+
+US_by_state <- US_by_state %>%  mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths))
+
+US_totals <- US_totals %>%  mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths))
+```
+
+## Visualization of cases and deaths each day in the whole of US and California
+```{r visualization_of_new_cases_and_new_deaths_in_US, message = FALSE}
+US_totals %>% ggplot(aes(x = date, y = new_cases)) + geom_line(aes(color = "new_cases")) + geom_point(aes(color = "new_cases")) + geom_line(aes(y = new_deaths, color = "new_deaths")) + geom_point(aes(y = new_deaths, color = "new_deaths")) + scale_y_log10() + theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) + labs(title = "COVID19 in US", y = NULL ) 
+
+US_by_state %>%  filter(Province_State == state) %>% ggplot(aes(x = date, y = new_cases)) + geom_line(aes(color = "new_cases")) + geom_point(aes(color = "new_cases")) + geom_line(aes(y = new_deaths, color = "new_deaths")) + geom_point(aes(y = new_deaths, color = "new_deaths")) + scale_y_log10() + theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) + labs(title = str_c("COVID19 in ", state), y = NULL ) 
+```
+
+Now after visualizing using the cases and deaths on each day instead of the aggregated cases and deaths, The covid cases and deaths peaked in the beginning of 2021 and also We can see that there is a dip in the number of cases and deaths in the mid 2021 and after that there is a upward trend in both the cases and deaths. This upward trend in mid 2021 might possibly due to the mutation of the virus into different variants.
+
+
+## Calculating cases and deaths per thousand in US by state
+
+Now let us find out the top 10 states that has the most and least death rates in the US by calculating the deaths per thousand and cases per thousand.
+
+```{r Calculating_cases_and_deaths_per_thousand_In_US, message = FALSE}
+
+US_state_totals <- US_by_state %>%  group_by(Province_State) %>% summarize(deaths = max(deaths), cases = max(cases), Population = max(Population), cases_per_thousand = 1000 * cases / Population, deaths_per_thousand = 1000 * deaths / Population) %>%  filter(cases > 0, Population > 0)
+
+US_state_totals %>% slice_min(deaths_per_thousand, n = 10) %>%  select(deaths_per_thousand, cases_per_thousand, everything())
+
+US_state_totals %>% slice_max(deaths_per_thousand, n = 10) %>%  select(deaths_per_thousand, cases_per_thousand, everything())
+```
+
+From the data above, we can see that American Samoa had the lowest death rate among all the states in the US followed by Northern Mariana Islands and other states.
+
+We can also see that the state of Arizona had the highest death rate with a whooping value of 4.54 deaths per thousand followed by Oklahoma and rest of the states.
+
+```{r Most_cases_and_deaths_globally, message=FALSE}
+global %>% 
+  group_by(Country_Region) %>%
+  summarise(total_cases = max(cases)) %>%
+  arrange(desc(total_cases)) %>%
+  head(n=10) %>% 
+  knitr::kable(
+    col.names = c("Country","Cases"), 
+    align = "rr", 
+    caption = "Countries with highest number of cases") %>% 
+  kable_styling(
+    bootstrap_options = "hover", 
+    full_width = F, 
+    position = "center"
+  )
+
+global %>%
+  group_by(Country_Region) %>%
+  summarize(death_toll = max(deaths))%>%
+  arrange(desc(death_toll)) %>%
+  head(n=10) %>% 
+  knitr::kable(col.names = c("Country","Deaths"), 
+               align = "rr",
+               caption = "Countries with highest fatalities") %>% 
+  kable_styling(
+    bootstrap_options = "hover", 
+    full_width = F, 
+    position = "center"
+  )
+```
+
+From the above data, We can see that US topped in both cases and deaths. India is in the 2nd position in the highest number of cases followed by France. Whereas Brazil is 2nd on the lists with the most number of deaths followed by India.
+
+## Linear Model: US vs The rest of the world
+
+```{r model, message = FALSE}
+US_vs_rest_of_the_world <- global %>% mutate(US = if_else(Country_Region == "US","US","The rest of the world")) %>% group_by(US,date) %>% summarize(cases = sum(cases))
+
+trend_US_vs_rest_of_the_world <- US_vs_rest_of_the_world %>%
+ggplot(aes(x = date, y = cases))+
+geom_line()+
+geom_smooth(method = "lm", se = FALSE, linetype = "dashed")+
+facet_wrap(~US, scales = "free")+
+scale_y_log10() +
+labs(
+title = "Linear model prediction of COVID-19 cases",
+subtitle = "US vs the rest of the world",
+x = "Year",
+y = "Cases") 
+
+trend_US_vs_rest_of_the_world
+```
+
+In the above visualization, The black line is the actual number of cases over the years and the Blue-dashed trend line is the linear prediction. We can see that the number of Covid cases are growing faster than the number of cases predicted by the linear model in both US and the rest of the world.
+
+## Bias
+
+1. The effects of COVID-19 on different age groups, genders and socio-economic backgrounds may differ, which may not be adequately represented in the dataset.
+
+2. The data is based on information that has been reported from various nations and regions, each of which may have testing rates, healthcare systems, and reporting procedures that vary, which could affect how accurate and quality the data is.
+
+
+## Conclusion
+
+The COVID-19 pandemic has had a profound impact on the world, causing many deaths and disrupting the economy, education and daily life. The virus is highly contagious and has evolved into several variants, some of which are more contagious and potentially more damaging than the original version. Although vaccines have been developed and distributed, their availability is uneven and some countries find it difficult to secure an adequate dose. The pandemic has highlighted the importance of public health measures such as social distancing, mask use and hand hygiene, and the need for global cooperation in the fight against infectious diseases.
+
+## Session info
+
+```{r sessionInfo, echo=FALSE, message=FALSE}
+sessionInfo()
+```
